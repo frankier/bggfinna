@@ -29,7 +29,7 @@ Then there's some joining and sorting.
 
 Tools:
  
- * Python
+ * Python (run with `. "$HOME/.cargo/env" && uv run python`)
  * uv
  * requests
  * DuckDB

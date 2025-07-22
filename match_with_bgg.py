@@ -6,7 +6,34 @@ import xml.etree.ElementTree as ET
 import time
 import sys
 import os
+import re
+import string
 from urllib.parse import quote
+
+def extract_authors_from_finna(authors_json):
+    """Extract author names from Finna authors JSON"""
+    if not authors_json:
+        return []
+    
+    try:
+        if isinstance(authors_json, str):
+            authors_data = json.loads(authors_json.replace("'", '"'))
+        else:
+            authors_data = authors_json
+            
+        author_names = []
+        
+        # Extract from primary authors
+        if 'primary' in authors_data:
+            for author_name in authors_data['primary'].keys():
+                # Clean author name (remove role info after comma)
+                clean_name = author_name.split(',')[0].strip()
+                if clean_name:
+                    author_names.append(clean_name)
+                    
+        return author_names
+    except:
+        return []
 
 def parse_bgg_search_response(xml_content):
     """Parse BGG search API response and return list of games"""
@@ -202,6 +229,17 @@ def search_bgg_by_title(title, max_retries=3):
     
     return []
 
+def normalize_title_for_matching(title):
+    """Remove punctuation and normalize title for matching"""
+    if not title:
+        return ""
+    # Convert to lowercase and remove all punctuation
+    title = title.lower()
+    title = title.translate(str.maketrans('', '', string.punctuation))
+    # Replace multiple spaces with single space and strip
+    title = re.sub(r'\s+', ' ', title).strip()
+    return title
+
 def check_matches(bgg_games, finna_titles, match_type='exact'):
     """Check for matches between BGG games and Finna titles"""
     matches = []
@@ -210,12 +248,16 @@ def check_matches(bgg_games, finna_titles, match_type='exact'):
         for bgg_name in game['names']:
             for finna_title in finna_titles:
                 if match_type == 'exact':
-                    if bgg_name.lower() == finna_title.lower():
+                    bgg_normalized = normalize_title_for_matching(bgg_name)
+                    finna_normalized = normalize_title_for_matching(finna_title)
+                    if bgg_normalized == finna_normalized:
                         matches.append({**game, 'match_type': 'exact'})
                         print(f"    Found exact match: {bgg_name} (ID: {game['bgg_id']}, Year: {game['year']})")
                         break
                 elif match_type == 'substring':
-                    if len(finna_title.split()) > 1 and finna_title.lower() in bgg_name.lower():
+                    bgg_normalized = normalize_title_for_matching(bgg_name)
+                    finna_normalized = normalize_title_for_matching(finna_title)
+                    if len(finna_title.split()) > 1 and finna_normalized in bgg_normalized:
                         matches.append({**game, 'match_type': 'substring'})
                         print(f"    Found substring match: '{finna_title}' in '{bgg_name}' (ID: {game['bgg_id']}, Year: {game['year']})")
                         break
@@ -223,7 +265,7 @@ def check_matches(bgg_games, finna_titles, match_type='exact'):
     return matches
 
 def find_best_bgg_match(finna_game):
-    """Find the best BGG match for a Finna game"""
+    """Find the best BGG match for a Finna game with multiple fallback strategies"""
     finna_titles = []
     
     # Add main title
@@ -235,6 +277,7 @@ def find_best_bgg_match(finna_game):
         alt_titles = finna_game['alternativeTitles'].split(';')
         finna_titles.extend([title.strip() for title in alt_titles if title.strip()])
     
+    # Get year and authors for advanced matching
     finna_year = None
     if finna_game['year']:
         try:
@@ -242,24 +285,26 @@ def find_best_bgg_match(finna_game):
         except (ValueError, TypeError):
             pass
     
-    print(f"Searching for: {finna_titles} (year: {finna_year})")
+    finna_authors = extract_authors_from_finna(finna_game.get('authors', ''))
+    
+    print(f"Searching for: {finna_titles} (year: {finna_year}, authors: {finna_authors})")
     
     all_matches = []
     
-    # First pass: Try exact matches
+    # STRATEGY 1: Try exact matches
     for title in finna_titles:
         if not title:
             continue
             
-        print(f"  Searching BGG for: '{title}'")
+        print(f"  Strategy 1 - Exact search for: '{title}'")
         bgg_games = search_bgg_by_title(title)
         
         exact_matches = check_matches(bgg_games, finna_titles, 'exact')
         all_matches.extend(exact_matches)
     
-    # Second pass: If no exact matches, try substring matching for multi-word titles
+    # STRATEGY 2: If no exact matches, try substring matching for multi-word titles
     if not all_matches:
-        print("  No exact matches, trying substring matching...")
+        print("  Strategy 2 - Substring matching...")
         
         for title in finna_titles:
             if not title or len(title.split()) <= 1:
@@ -270,6 +315,67 @@ def find_best_bgg_match(finna_game):
             
             substring_matches = check_matches(bgg_games, finna_titles, 'substring')
             all_matches.extend(substring_matches)
+    
+    # STRATEGY 3: Author + fuzzy title matching
+    if not all_matches and finna_authors:
+        print("  Strategy 3 - Author + fuzzy title matching...")
+        
+        for author in finna_authors[:2]:  # Try first 2 authors to avoid too many API calls
+            print(f"  Searching by author: '{author}'")
+            author_game_ids = search_bgg_by_author(author)
+            
+            if author_game_ids:
+                # Get details for author's games
+                author_games = []
+                for game_id in author_game_ids:
+                    game_details = get_bgg_game_details(game_id)
+                    if game_details:
+                        # Check if author is actually in the designers
+                        if any(author.lower() in designer.lower() for designer in game_details.get('designers', [])):
+                            bgg_game = {
+                                'bgg_id': game_id,
+                                'names': game_details.get('all_names', []),
+                                'year': game_details.get('year'),
+                                'designers': game_details.get('designers', [])
+                            }
+                            author_games.append(bgg_game)
+                
+                # Try fuzzy matching with author's games
+                fuzzy_matches = check_fuzzy_matches(author_games, finna_titles, threshold=75)
+                if fuzzy_matches:
+                    for match in fuzzy_matches:
+                        match['match_type'] = 'author_fuzzy_title'
+                    all_matches.extend(fuzzy_matches)
+                    break
+    
+    # STRATEGY 4: Author + exact year match (last resort)
+    if not all_matches and finna_authors and finna_year:
+        print("  Strategy 4 - Author + exact year matching...")
+        
+        for author in finna_authors[:2]:
+            print(f"  Searching by author + year: '{author}' ({finna_year})")
+            author_game_ids = search_bgg_by_author(author)
+            
+            if author_game_ids:
+                for game_id in author_game_ids:
+                    game_details = get_bgg_game_details(game_id)
+                    if game_details:
+                        game_year = game_details.get('year')
+                        if game_year and int(game_year) == finna_year:
+                            # Check if author is in designers
+                            if any(author.lower() in designer.lower() for designer in game_details.get('designers', [])):
+                                year_match = {
+                                    'bgg_id': game_id,
+                                    'names': game_details.get('all_names', []),
+                                    'year': game_year,
+                                    'match_type': 'author_year'
+                                }
+                                all_matches.append(year_match)
+                                print(f"    Found author+year match: {game_details.get('primary_name')} (ID: {game_id}, Year: {game_year})")
+                                break
+                
+                if all_matches:
+                    break
     
     if not all_matches:
         print("  No matches found")
@@ -282,19 +388,31 @@ def find_best_bgg_match(finna_game):
     all_matches = list(unique_matches.values())
     
     if len(all_matches) == 1:
-        print(f"  Single match: {all_matches[0]['names'][0]}")
+        match_type = all_matches[0].get('match_type', 'exact')
+        print(f"  Single {match_type} match: {all_matches[0]['names'][0]}")
         return all_matches[0]
     
-    # Multiple matches - pick by closest year
-    if finna_year:
-        best_match = min(all_matches, 
-                        key=lambda x: abs(x['year'] - finna_year) if x['year'] else float('inf'))
-        print(f"  Best year match: {best_match['names'][0]} (BGG year: {best_match['year']}, diff: {abs(best_match['year'] - finna_year) if best_match['year'] else 'unknown'})")
-        return best_match
-    else:
-        # No year info, just pick the first one
-        print(f"  No year info, picking first: {all_matches[0]['names'][0]}")
-        return all_matches[0]
+    # Multiple matches - prioritize by match type and year
+    match_priority = {'exact': 0, 'substring': 1, 'author_fuzzy_title': 2, 'author_year': 3}
+    
+    # Sort by match type priority first
+    all_matches.sort(key=lambda x: match_priority.get(x.get('match_type', 'exact'), 99))
+    
+    # If same match type, use year to disambiguate
+    if finna_year and len(all_matches) > 1:
+        print(f"  Multiple matches found, using year {finna_year} for disambiguation")
+        year_matches = [m for m in all_matches if m.get('year') and abs(int(m['year']) - finna_year) <= 1]
+        if year_matches:
+            best_match = year_matches[0]
+            match_type = best_match.get('match_type', 'exact')
+            print(f"  Best {match_type} + year match: {best_match['names'][0]} (BGG year: {best_match['year']})")
+            return best_match
+    
+    # Return the highest priority match
+    best_match = all_matches[0]
+    match_type = best_match.get('match_type', 'exact')
+    print(f"  Best {match_type} match: {best_match['names'][0]}")
+    return best_match
 
 def check_and_truncate_output_file(output_file):
     """Check output file and return number of complete lines to skip"""
@@ -387,6 +505,7 @@ def main():
                     result['bgg_users_rated'] = bgg_details['users_rated']
                     result['bgg_weight'] = bgg_details['weight']
                     result['bgg_owned'] = bgg_details['owned']
+                    result['match_type'] = bgg_match.get('match_type', 'exact')
                 else:
                     # Fallback to basic match info
                     result['bgg_id'] = bgg_match['bgg_id']
@@ -399,6 +518,7 @@ def main():
                                  'bgg_publishers', 'bgg_rank', 'bgg_average_rating', 'bgg_bayes_average', 
                                  'bgg_users_rated', 'bgg_weight', 'bgg_owned']:
                         result[field] = ''
+                    result['match_type'] = bgg_match.get('match_type', 'exact')
             else:
                 # No BGG match found
                 for field in ['bgg_id', 'bgg_primary_name', 'bgg_all_names', 'bgg_year', 'bgg_description', 
@@ -407,6 +527,7 @@ def main():
                              'bgg_rank', 'bgg_average_rating', 'bgg_bayes_average', 'bgg_users_rated', 
                              'bgg_weight', 'bgg_owned']:
                     result[field] = ''
+                result['match_type'] = 'none'
             
             # Initialize writer on first row
             if writer is None:
