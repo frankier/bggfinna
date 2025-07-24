@@ -1,16 +1,18 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Purpose
 
 The purpose of this repository is to grab all the boad games available in a particular region of Finnish libraries, given as input. Information from Board Game Geek (BGG) is then used to obtain ranks. Then we can see the top ranked games we can get from the library, and also filter by other stuff like "family" and "co-op"
 
-First all information and the relevant fields is dumped into a CSV from Finna.
+This is done using a pipeline which ends up as a DuckDB database.
 
-A second script is then going to get extra information from BGG.
+A Streamlit dashboard allows the user to browse the database.
 
-Then there's some joining and sorting.
+## Coding style
+
+ * Be succinct!
+ * PEP-8 where possible.
+ * Don't swallow unknown exceptions or write generic error handlers, just let the default error bubble up.
+ * Don't make programs output too much and be too chatty.
+ * Try to make code speak for itself, but short docstrings and occasional comments are welcome.
 
 ## Background
 
@@ -27,9 +29,18 @@ Then there's some joining and sorting.
 
 ## Development Setup
 
-Tools:
+Tools and libraries in use include
  
  * Python (run with `. "$HOME/.cargo/env" && uv run python`)
  * uv
  * requests
  * DuckDB
+ * Streamlit
+
+You might need to add `$HOME/.cargo/bin` to your `$PATH` to run uv.
+
+Streamlit does not show errors when with the `streamlit` command so always try running the script with `python` first.
+
+## Usage
+
+Refer to @README.md

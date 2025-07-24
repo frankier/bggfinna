@@ -81,7 +81,7 @@ def main():
     # Category filter
     try:
         categories = get_categories_list()
-        category_options = {name: cat_id for cat_id, name in categories[:50]}  # Limit for performance
+        category_options = {name: cat_id for cat_id, name in categories}
         selected_category_names = st.sidebar.multiselect(
             "Categories", 
             list(category_options.keys()),
@@ -94,7 +94,7 @@ def main():
     # Mechanics filter
     try:
         mechanics = get_mechanics_list()
-        mechanic_options = {name: mech_id for mech_id, name in mechanics[:50]}  # Limit for performance
+        mechanic_options = {name: mech_id for mech_id, name in mechanics}
         selected_mechanic_names = st.sidebar.multiselect(
             "Mechanics", 
             list(mechanic_options.keys()),
@@ -321,7 +321,7 @@ def main():
     display_cols = [
         'Title', 'BGG Title', 'bgg_average_rating', 'bgg_rank',
         'bgg_min_players', 'bgg_max_players', 'bgg_playing_time', 
-        'bgg_categories', 'bgg_mechanics', 'Finna Link', 'BGG Link'
+        'categories', 'mechanics', 'Finna Link', 'BGG Link'
     ]
     games_list = games_list[display_cols]
     

@@ -9,6 +9,8 @@ import os
 import re
 import string
 from urllib.parse import quote
+from tqdm import tqdm
+from bggfinna import get_unprocessed_items, should_write_header, get_bgg_game_details, get_data_path, is_test_mode
 
 def extract_authors_from_finna(authors_json):
     """Extract author names from Finna authors JSON"""
@@ -63,7 +65,7 @@ def parse_bgg_search_response(xml_content):
         
         return games
     except ET.ParseError as e:
-        print(f"Error parsing BGG XML: {e}")
+        tqdm.write(f"Error parsing BGG XML: {e}")
         return []
 
 def parse_bgg_thing_response(xml_content):
@@ -176,7 +178,7 @@ def parse_bgg_thing_response(xml_content):
         return game
         
     except ET.ParseError as e:
-        print(f"Error parsing BGG thing XML: {e}")
+        tqdm.write(f"Error parsing BGG thing XML: {e}")
         return None
 
 def get_bgg_game_details(bgg_id, max_retries=3):
@@ -198,7 +200,7 @@ def get_bgg_game_details(bgg_id, max_retries=3):
             return parse_bgg_thing_response(response.content)
             
         except requests.exceptions.RequestException as e:
-            print(f"Request failed for BGG ID {bgg_id} (attempt {attempt + 1}): {e}")
+            tqdm.write(f"Request failed for BGG ID {bgg_id} (attempt {attempt + 1}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(1)
     
@@ -223,7 +225,7 @@ def search_bgg_by_title(title, max_retries=3):
             return parse_bgg_search_response(response.content)
             
         except requests.exceptions.RequestException as e:
-            print(f"Request failed for '{title}' (attempt {attempt + 1}): {e}")
+            tqdm.write(f"Request failed for '{title}' (attempt {attempt + 1}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(1)
     
@@ -252,14 +254,14 @@ def check_matches(bgg_games, finna_titles, match_type='exact'):
                     finna_normalized = normalize_title_for_matching(finna_title)
                     if bgg_normalized == finna_normalized:
                         matches.append({**game, 'match_type': 'exact'})
-                        print(f"    Found exact match: {bgg_name} (ID: {game['bgg_id']}, Year: {game['year']})")
+                        tqdm.write(f"    Found exact match: {bgg_name} (ID: {game['bgg_id']}, Year: {game['year']})")
                         break
                 elif match_type == 'substring':
                     bgg_normalized = normalize_title_for_matching(bgg_name)
                     finna_normalized = normalize_title_for_matching(finna_title)
                     if len(finna_title.split()) > 1 and finna_normalized in bgg_normalized:
                         matches.append({**game, 'match_type': 'substring'})
-                        print(f"    Found substring match: '{finna_title}' in '{bgg_name}' (ID: {game['bgg_id']}, Year: {game['year']})")
+                        tqdm.write(f"    Found substring match: '{finna_title}' in '{bgg_name}' (ID: {game['bgg_id']}, Year: {game['year']})")
                         break
     
     return matches
@@ -287,7 +289,7 @@ def find_best_bgg_match(finna_game):
     
     finna_authors = extract_authors_from_finna(finna_game.get('authors', ''))
     
-    print(f"Searching for: {finna_titles} (year: {finna_year}, authors: {finna_authors})")
+    tqdm.write(f"Searching for: {finna_titles} (year: {finna_year}, authors: {finna_authors})")
     
     all_matches = []
     
@@ -296,7 +298,7 @@ def find_best_bgg_match(finna_game):
         if not title:
             continue
             
-        print(f"  Strategy 1 - Exact search for: '{title}'")
+        tqdm.write(f"  Strategy 1 - Exact search for: '{title}'")
         bgg_games = search_bgg_by_title(title)
         
         exact_matches = check_matches(bgg_games, finna_titles, 'exact')
@@ -304,13 +306,13 @@ def find_best_bgg_match(finna_game):
     
     # STRATEGY 2: If no exact matches, try substring matching for multi-word titles
     if not all_matches:
-        print("  Strategy 2 - Substring matching...")
+        tqdm.write("  Strategy 2 - Substring matching...")
         
         for title in finna_titles:
             if not title or len(title.split()) <= 1:
                 continue  # Skip single words to avoid false positives
                 
-            print(f"  Substring search for: '{title}'")
+            tqdm.write(f"  Substring search for: '{title}'")
             bgg_games = search_bgg_by_title(title)
             
             substring_matches = check_matches(bgg_games, finna_titles, 'substring')
@@ -318,10 +320,10 @@ def find_best_bgg_match(finna_game):
     
     # STRATEGY 3: Author + fuzzy title matching
     if not all_matches and finna_authors:
-        print("  Strategy 3 - Author + fuzzy title matching...")
+        tqdm.write("  Strategy 3 - Author + fuzzy title matching...")
         
         for author in finna_authors[:2]:  # Try first 2 authors to avoid too many API calls
-            print(f"  Searching by author: '{author}'")
+            tqdm.write(f"  Searching by author: '{author}'")
             author_game_ids = search_bgg_by_author(author)
             
             if author_game_ids:
@@ -350,10 +352,10 @@ def find_best_bgg_match(finna_game):
     
     # STRATEGY 4: Author + exact year match (last resort)
     if not all_matches and finna_authors and finna_year:
-        print("  Strategy 4 - Author + exact year matching...")
+        tqdm.write("  Strategy 4 - Author + exact year matching...")
         
         for author in finna_authors[:2]:
-            print(f"  Searching by author + year: '{author}' ({finna_year})")
+            tqdm.write(f"  Searching by author + year: '{author}' ({finna_year})")
             author_game_ids = search_bgg_by_author(author)
             
             if author_game_ids:
@@ -371,14 +373,14 @@ def find_best_bgg_match(finna_game):
                                     'match_type': 'author_year'
                                 }
                                 all_matches.append(year_match)
-                                print(f"    Found author+year match: {game_details.get('primary_name')} (ID: {game_id}, Year: {game_year})")
+                                tqdm.write(f"    Found author+year match: {game_details.get('primary_name')} (ID: {game_id}, Year: {game_year})")
                                 break
                 
                 if all_matches:
                     break
     
     if not all_matches:
-        print("  No matches found")
+        tqdm.write("  No matches found")
         return None
     
     # Remove duplicates based on BGG ID
@@ -389,7 +391,7 @@ def find_best_bgg_match(finna_game):
     
     if len(all_matches) == 1:
         match_type = all_matches[0].get('match_type', 'exact')
-        print(f"  Single {match_type} match: {all_matches[0]['names'][0]}")
+        tqdm.write(f"  Single {match_type} match: {all_matches[0]['names'][0]}")
         return all_matches[0]
     
     # Multiple matches - prioritize by match type and year
@@ -400,147 +402,76 @@ def find_best_bgg_match(finna_game):
     
     # If same match type, use year to disambiguate
     if finna_year and len(all_matches) > 1:
-        print(f"  Multiple matches found, using year {finna_year} for disambiguation")
+        tqdm.write(f"  Multiple matches found, using year {finna_year} for disambiguation")
         year_matches = [m for m in all_matches if m.get('year') and abs(int(m['year']) - finna_year) <= 1]
         if year_matches:
             best_match = year_matches[0]
             match_type = best_match.get('match_type', 'exact')
-            print(f"  Best {match_type} + year match: {best_match['names'][0]} (BGG year: {best_match['year']})")
+            tqdm.write(f"  Best {match_type} + year match: {best_match['names'][0]} (BGG year: {best_match['year']})")
             return best_match
     
     # Return the highest priority match
     best_match = all_matches[0]
     match_type = best_match.get('match_type', 'exact')
-    print(f"  Best {match_type} match: {best_match['names'][0]}")
+    tqdm.write(f"  Best {match_type} match: {best_match['names'][0]}")
     return best_match
 
-def check_and_truncate_output_file(output_file):
-    """Check output file and return number of complete lines to skip"""
-    if not os.path.exists(output_file):
-        return 0
-    
-    with open(output_file, 'rb') as f:
-        content = f.read()
-    
-    if not content:
-        return 0
-    
-    # Check if file ends with newline
-    if not content.endswith(b'\n'):
-        # Truncate to last complete line
-        last_newline = content.rfind(b'\n')
-        if last_newline != -1:
-            with open(output_file, 'wb') as f:
-                f.write(content[:last_newline + 1])
-        else:
-            # No complete lines, start fresh
-            os.remove(output_file)
-            return 0
-    
-    # Count complete lines (subtract 1 for header)
-    with open(output_file, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
-    return max(0, len(lines) - 1)  # Subtract 1 for header
 
 def main():
-    # Parse arguments
-    input_file = sys.argv[1] if len(sys.argv) > 1 else 'data/finna_board_games.csv'
-    output_file = sys.argv[2] if len(sys.argv) > 2 else 'data/finna_bgg_matches.csv'
+    # Parse arguments with test mode support
+    input_file = sys.argv[1] if len(sys.argv) > 1 else get_data_path('finna_board_games.csv')
+    output_file = sys.argv[2] if len(sys.argv) > 2 else get_data_path('finna_bgg_relations.csv')
     
-    # Check existing output file and determine skip count
-    skip_count = check_and_truncate_output_file(output_file)
+    if is_test_mode():
+        print("Running in TEST mode - outputs will go to data/test/")
     
-    # Read Finna games
-    finna_games = []
+    # Read all Finna games
     with open(input_file, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        finna_games = list(reader)
+        all_finna_games = list(reader)
     
-    print(f"Processing {len(finna_games)} Finna games...")
-    if skip_count > 0:
-        print(f"Resuming from game {skip_count + 1} (skipping {skip_count} already processed)")
+    # Get unprocessed games using set difference
+    unprocessed_games = get_unprocessed_items(
+        all_finna_games, output_file, 'id', 'finna_id'
+    )
     
-    # Open output file for streaming
-    file_exists = os.path.exists(output_file)
-    mode = 'a' if file_exists else 'w'
+    total_games = len(all_finna_games)
+    processed_count = total_games - len(unprocessed_games)
+    
+    if processed_count > 0:
+        print(f"Found {processed_count} already processed games, {len(unprocessed_games)} remaining")
+    
+    if not unprocessed_games:
+        print("All games already processed!")
+        return
+    
+    # Determine file mode and whether to write header
+    write_header = should_write_header(output_file)
+    mode = 'w' if write_header else 'a'
     
     with open(output_file, mode, newline='', encoding='utf-8') as csvfile:
-        fieldnames = None
-        writer = None
+        fieldnames = ['finna_id', 'bgg_id', 'match_type']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
-        for i, finna_game in enumerate(finna_games):
-            # Skip already processed games
-            if i < skip_count:
-                continue
+        if write_header:
+            writer.writeheader()
+        
+        with tqdm(total=len(unprocessed_games), desc="Matching games", unit="games") as pbar:
+            for finna_game in unprocessed_games:
+                pbar.set_description(f"Processing: {finna_game['title'][:30]}...")
                 
-            print(f"\n[{i+1}/{len(finna_games)}] Processing: {finna_game['title']}")
-            
-            bgg_match = find_best_bgg_match(finna_game)
-            
-            # Combine Finna and BGG data
-            result = finna_game.copy()
-            if bgg_match:
-                print(f"  Fetching detailed BGG info for ID {bgg_match['bgg_id']}...")
-                bgg_details = get_bgg_game_details(bgg_match['bgg_id'])
+                bgg_match = find_best_bgg_match(finna_game)
                 
-                if bgg_details:
-                    # Add all BGG fields
-                    result['bgg_id'] = bgg_details['bgg_id']
-                    result['bgg_primary_name'] = bgg_details['primary_name']
-                    result['bgg_all_names'] = '; '.join(bgg_details['all_names'])
-                    result['bgg_year'] = bgg_details['year']
-                    result['bgg_description'] = bgg_details['description'][:500] + '...' if len(bgg_details['description']) > 500 else bgg_details['description']
-                    result['bgg_min_players'] = bgg_details['min_players']
-                    result['bgg_max_players'] = bgg_details['max_players']
-                    result['bgg_playing_time'] = bgg_details['playing_time']
-                    result['bgg_min_age'] = bgg_details['min_age']
-                    result['bgg_categories'] = '; '.join(bgg_details['categories'])
-                    result['bgg_mechanics'] = '; '.join(bgg_details['mechanics'])
-                    result['bgg_designers'] = '; '.join(bgg_details['designers'])
-                    result['bgg_publishers'] = '; '.join(bgg_details['publishers'])
-                    result['bgg_rank'] = bgg_details['bgg_rank']
-                    result['bgg_average_rating'] = bgg_details['average_rating']
-                    result['bgg_bayes_average'] = bgg_details['bayes_average']
-                    result['bgg_users_rated'] = bgg_details['users_rated']
-                    result['bgg_weight'] = bgg_details['weight']
-                    result['bgg_owned'] = bgg_details['owned']
-                    result['match_type'] = bgg_match.get('match_type', 'exact')
-                else:
-                    # Fallback to basic match info
-                    result['bgg_id'] = bgg_match['bgg_id']
-                    result['bgg_primary_name'] = bgg_match['names'][0] if bgg_match['names'] else ''
-                    result['bgg_all_names'] = '; '.join(bgg_match['names'])
-                    result['bgg_year'] = bgg_match['year']
-                    # Empty fields for failed detail fetch
-                    for field in ['bgg_description', 'bgg_min_players', 'bgg_max_players', 'bgg_playing_time', 
-                                 'bgg_min_age', 'bgg_categories', 'bgg_mechanics', 'bgg_designers', 
-                                 'bgg_publishers', 'bgg_rank', 'bgg_average_rating', 'bgg_bayes_average', 
-                                 'bgg_users_rated', 'bgg_weight', 'bgg_owned']:
-                        result[field] = ''
-                    result['match_type'] = bgg_match.get('match_type', 'exact')
-            else:
-                # No BGG match found
-                for field in ['bgg_id', 'bgg_primary_name', 'bgg_all_names', 'bgg_year', 'bgg_description', 
-                             'bgg_min_players', 'bgg_max_players', 'bgg_playing_time', 'bgg_min_age', 
-                             'bgg_categories', 'bgg_mechanics', 'bgg_designers', 'bgg_publishers', 
-                             'bgg_rank', 'bgg_average_rating', 'bgg_bayes_average', 'bgg_users_rated', 
-                             'bgg_weight', 'bgg_owned']:
-                    result[field] = ''
-                result['match_type'] = 'none'
-            
-            # Initialize writer on first row
-            if writer is None:
-                fieldnames = list(result.keys())
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                if not file_exists or skip_count == 0:
-                    writer.writeheader()
-            
-            # Write row and flush every 10 games
-            writer.writerow(result)
-            if (i + 1) % 10 == 0:
-                csvfile.flush()
-                print(f"  Progress saved ({i + 1}/{len(finna_games)} games processed)")
+                # Create minimal relation record
+                result = {
+                    'finna_id': finna_game['id'],
+                    'bgg_id': bgg_match['bgg_id'] if bgg_match else '',
+                    'match_type': bgg_match.get('match_type', 'none') if bgg_match else 'none'
+                }
+                
+                writer.writerow(result)
+                csvfile.flush()  # Flush after each write for safety
+                pbar.update(1)
     
     print(f"\nCompleted! Results saved to {output_file}")
 

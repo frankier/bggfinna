@@ -4,26 +4,49 @@ import duckdb
 import pandas as pd
 import sys
 import os
+from bggfinna import get_data_path, is_test_mode
 
-def load_csv_to_duckdb(csv_file='data/finna_bgg_matches.csv', db_file='data/boardgames.db'):
-    """Load CSV data into DuckDB database"""
+def load_csv_to_duckdb(data_dir=None, db_file=None):
+    """Load all CSV data into DuckDB database"""
+    if data_dir is None:
+        data_dir = get_data_path('')
+    if db_file is None:
+        db_file = get_data_path('boardgames.db')
     
-    # Check if CSV file exists
-    if not os.path.exists(csv_file):
-        print(f"Error: CSV file '{csv_file}' not found")
-        return False
+    # Define the CSV files to load
+    finna_csv = os.path.join(data_dir, 'finna_board_games.csv')
+    relations_csv = os.path.join(data_dir, 'finna_bgg_relations.csv')
+    bgg_csv = os.path.join(data_dir, 'bgg_games.csv')
+    
+    # Check if all CSV files exist
+    for csv_file in [finna_csv, relations_csv, bgg_csv]:
+        if not os.path.exists(csv_file):
+            print(f"Error: CSV file '{csv_file}' not found")
+            return False
     
     # Connect to DuckDB
     conn = duckdb.connect(db_file)
     
-    print(f"Loading {csv_file} into DuckDB...")
+    print(f"Loading CSV files from {data_dir} into DuckDB...")
     
     try:
-        # Read CSV and create temporary table first
+        # Load Finna games
         conn.execute("""
-            CREATE OR REPLACE TABLE games_raw AS 
+            CREATE OR REPLACE TABLE finna_games AS 
             SELECT * FROM read_csv_auto(?, header=true)
-        """, (csv_file,))
+        """, (finna_csv,))
+        
+        # Load BGG-Finna relations
+        conn.execute("""
+            CREATE OR REPLACE TABLE finna_bgg_relations AS 
+            SELECT * FROM read_csv_auto(?, header=true)
+        """, (relations_csv,))
+        
+        # Load BGG games data
+        conn.execute("""
+            CREATE OR REPLACE TABLE bgg_games AS 
+            SELECT * FROM read_csv_auto(?, header=true)
+        """, (bgg_csv,))
         
         print("Normalizing categories and mechanics...")
         
@@ -34,9 +57,9 @@ def load_csv_to_duckdb(csv_file='data/finna_bgg_matches.csv', db_file='data/boar
                 ROW_NUMBER() OVER (ORDER BY category) as category_id,
                 category
             FROM (
-                SELECT DISTINCT TRIM(unnest(string_split(bgg_categories, ';'))) as category
-                FROM games_raw 
-                WHERE bgg_categories IS NOT NULL AND bgg_categories != ''
+                SELECT DISTINCT TRIM(unnest(string_split(categories, ';'))) as category
+                FROM bgg_games 
+                WHERE categories IS NOT NULL AND categories != ''
             ) t
             WHERE category != ''
         """)
@@ -48,55 +71,79 @@ def load_csv_to_duckdb(csv_file='data/finna_bgg_matches.csv', db_file='data/boar
                 ROW_NUMBER() OVER (ORDER BY mechanic) as mechanic_id,
                 mechanic
             FROM (
-                SELECT DISTINCT TRIM(unnest(string_split(bgg_mechanics, ';'))) as mechanic
-                FROM games_raw 
-                WHERE bgg_mechanics IS NOT NULL AND bgg_mechanics != ''
+                SELECT DISTINCT TRIM(unnest(string_split(mechanics, ';'))) as mechanic
+                FROM bgg_games 
+                WHERE mechanics IS NOT NULL AND mechanics != ''
             ) t
             WHERE mechanic != ''
         """)
         
-        # Create main games table without raw categories/mechanics columns
+        # Create main games table by joining Finna and BGG data
         conn.execute("""
             CREATE OR REPLACE TABLE games AS
             SELECT 
-                *,
-                (bgg_id IS NOT NULL AND bgg_id::VARCHAR != '') as has_bgg_match,
+                f.*,
+                b.primary_name,
+                b.all_names,
+                b.year,
+                b.description,
+                b.min_players,
+                b.max_players,
+                b.playing_time,
+                b.min_play_time,
+                b.max_play_time,
+                b.min_age,
+                b.categories,
+                b.mechanics,
+                b.families,
+                b.designers,
+                b.artists,
+                b.publishers,
+                b.bgg_rank,
+                b.average_rating,
+                b.bayes_average,
+                b.users_rated,
+                b.weight,
+                b.owned,
+                (r.bgg_id IS NOT NULL AND r.bgg_id::VARCHAR != '') as has_bgg_match,
                 TRUE as library_available
-            FROM games_raw
+            FROM finna_games f
+            LEFT JOIN finna_bgg_relations r ON f.id = r.finna_id
+            LEFT JOIN bgg_games b ON r.bgg_id = b.bgg_id
         """)
         
         # Create game_categories junction table
         conn.execute("""
             CREATE OR REPLACE TABLE game_categories AS
             SELECT DISTINCT
-                g.id as game_id,
+                g.bgg_id as game_id,
                 c.category_id
-            FROM games_raw g
-            CROSS JOIN unnest(string_split(g.bgg_categories, ';')) as t(category)
+            FROM bgg_games g
+            CROSS JOIN unnest(string_split(g.categories, ';')) as t(category)
             JOIN categories c ON TRIM(t.category) = c.category
-            WHERE g.bgg_categories IS NOT NULL AND g.bgg_categories != ''
+            WHERE g.categories IS NOT NULL AND g.categories != ''
         """)
         
         # Create game_mechanics junction table
         conn.execute("""
             CREATE OR REPLACE TABLE game_mechanics AS
             SELECT DISTINCT
-                g.id as game_id,
+                g.bgg_id as game_id,
                 m.mechanic_id
-            FROM games_raw g
-            CROSS JOIN unnest(string_split(g.bgg_mechanics, ';')) as t(mechanic)
+            FROM bgg_games g
+            CROSS JOIN unnest(string_split(g.mechanics, ';')) as t(mechanic)
             JOIN mechanics m ON TRIM(t.mechanic) = m.mechanic
-            WHERE g.bgg_mechanics IS NOT NULL AND g.bgg_mechanics != ''
+            WHERE g.mechanics IS NOT NULL AND g.mechanics != ''
         """)
         
         # Drop the raw table
-        conn.execute("DROP TABLE games_raw")
+        # Keep the original tables for reference
         
         print("Creating indexes...")
         # Create indexes for better query performance
-        conn.execute("CREATE INDEX idx_games_bgg_rating ON games(bgg_average_rating)")
+        conn.execute("CREATE INDEX idx_games_bgg_rating ON games(bayes_average)")
         conn.execute("CREATE INDEX idx_games_bgg_rank ON games(bgg_rank)")
-        conn.execute("CREATE INDEX idx_games_title ON games(title)")
+        conn.execute("CREATE INDEX idx_games_title ON games(primary_name)")
         conn.execute("CREATE INDEX idx_games_has_bgg ON games(has_bgg_match)")
         conn.execute("CREATE INDEX idx_games_id ON games(id)")
         
@@ -121,10 +168,10 @@ def load_csv_to_duckdb(csv_file='data/finna_bgg_matches.csv', db_file='data/boar
         # Show sample data
         print("\nSample of loaded data:")
         sample = conn.execute("""
-            SELECT title, bgg_primary_name, bgg_average_rating, bgg_rank
+            SELECT title, primary_name, bayes_average, bgg_rank
             FROM games 
-            WHERE has_bgg_match = TRUE AND bgg_average_rating IS NOT NULL
-            ORDER BY bgg_average_rating DESC 
+            WHERE has_bgg_match = TRUE AND bayes_average IS NOT NULL
+            ORDER BY bayes_average DESC 
             LIMIT 5
         """).fetchall()
         
@@ -144,18 +191,18 @@ def load_csv_to_duckdb(csv_file='data/finna_bgg_matches.csv', db_file='data/boar
         
         return True
         
-    except Exception as e:
-        print(f"Error loading data: {e}")
-        return False
     finally:
         conn.close()
 
 def main():
-    # Parse command line arguments
-    csv_file = sys.argv[1] if len(sys.argv) > 1 else 'data/finna_bgg_matches.csv'
-    db_file = sys.argv[2] if len(sys.argv) > 2 else 'data/boardgames.db'
+    # Parse command line arguments with test mode support  
+    data_dir = sys.argv[1] if len(sys.argv) > 1 else get_data_path('')
+    db_file = sys.argv[2] if len(sys.argv) > 2 else get_data_path('boardgames.db')
     
-    success = load_csv_to_duckdb(csv_file, db_file)
+    if is_test_mode():
+        print("Running in TEST mode - outputs will go to data/test/")
+    
+    success = load_csv_to_duckdb(data_dir, db_file)
     
     if success:
         print(f"\n🎲 Ready to use! Run: streamlit run dashboard.py")
