@@ -164,7 +164,7 @@ def main():
                     c.category,
                     COUNT(DISTINCT g.id) as count
                 FROM games g
-                JOIN game_categories gc ON g.id = gc.game_id
+                JOIN game_categories gc ON g.bgg_id = gc.game_id
                 JOIN categories c ON gc.category_id = c.category_id
                 WHERE {where_clause.replace('games', 'g')}
                 GROUP BY c.category
@@ -288,9 +288,9 @@ def main():
             string_agg(DISTINCT c.category, '; ' ORDER BY c.category) as categories,
             string_agg(DISTINCT m.mechanic, '; ' ORDER BY m.mechanic) as mechanics
         FROM games g
-        LEFT JOIN game_categories gc ON g.id = gc.game_id
+        LEFT JOIN game_categories gc ON g.bgg_id = gc.game_id
         LEFT JOIN categories c ON gc.category_id = c.category_id
-        LEFT JOIN game_mechanics gm ON g.id = gm.game_id
+        LEFT JOIN game_mechanics gm ON g.bgg_id = gm.game_id
         LEFT JOIN mechanics m ON gm.mechanic_id = m.mechanic_id
         WHERE {where_clause}
         GROUP BY g.id, g.title, g.bgg_id, g.bgg_primary_name, g.bgg_average_rating, g.bgg_rank, 
@@ -399,9 +399,9 @@ def main():
                 g.year,
                 g.has_bgg_match
             FROM games g
-            LEFT JOIN game_categories gc ON g.id = gc.game_id
+            LEFT JOIN game_categories gc ON g.bgg_id = gc.game_id
             LEFT JOIN categories c ON gc.category_id = c.category_id
-            LEFT JOIN game_mechanics gm ON g.id = gm.game_id
+            LEFT JOIN game_mechanics gm ON g.bgg_id = gm.game_id
             LEFT JOIN mechanics m ON gm.mechanic_id = m.mechanic_id
             WHERE (g.title ILIKE '%{search_term}%' OR g.bgg_primary_name ILIKE '%{search_term}%')
             AND {where_clause.replace('games', 'g').replace(' id ', ' g.id ')}

@@ -8,9 +8,12 @@ import sys
 import os
 import re
 import string
+import json
 from urllib.parse import quote
 from tqdm import tqdm
+from fuzzywuzzy import fuzz
 from bggfinna import get_unprocessed_items, should_write_header, get_bgg_game_details, get_data_path, is_test_mode
+from bggfinna.bggapi import search_bgg_by_title, search_bgg_by_author
 
 def extract_authors_from_finna(authors_json):
     """Extract author names from Finna authors JSON"""
@@ -37,36 +40,6 @@ def extract_authors_from_finna(authors_json):
     except:
         return []
 
-def parse_bgg_search_response(xml_content):
-    """Parse BGG search API response and return list of games"""
-    try:
-        root = ET.fromstring(xml_content)
-        games = []
-        
-        for item in root.findall('.//item'):
-            game = {
-                'bgg_id': item.get('id'),
-                'type': item.get('type'),
-                'names': [],
-                'year': None
-            }
-            
-            # Get all names (primary and alternate)
-            for name in item.findall('name'):
-                game['names'].append(name.get('value'))
-            
-            # Get year
-            year_elem = item.find('yearpublished')
-            if year_elem is not None:
-                game['year'] = int(year_elem.get('value'))
-            
-            if game['type'] == 'boardgame':
-                games.append(game)
-        
-        return games
-    except ET.ParseError as e:
-        tqdm.write(f"Error parsing BGG XML: {e}")
-        return []
 
 def parse_bgg_thing_response(xml_content):
     """Parse BGG thing API response and return detailed game info"""
@@ -206,30 +179,6 @@ def get_bgg_game_details(bgg_id, max_retries=3):
     
     return None
 
-def search_bgg_by_title(title, max_retries=3):
-    """Search BGG API for a game title"""
-    url = f"https://boardgamegeek.com/xmlapi2/search?query={quote(title)}&type=boardgame"
-    
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            
-            if response.status_code == 202:
-                # BGG is processing, wait and retry
-                time.sleep(2)
-                continue
-            else:
-                time.sleep(1)
-                
-            return parse_bgg_search_response(response.content)
-            
-        except requests.exceptions.RequestException as e:
-            tqdm.write(f"Request failed for '{title}' (attempt {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                time.sleep(1)
-    
-    return []
 
 def normalize_title_for_matching(title):
     """Remove punctuation and normalize title for matching"""
@@ -241,6 +190,70 @@ def normalize_title_for_matching(title):
     # Replace multiple spaces with single space and strip
     title = re.sub(r'\s+', ' ', title).strip()
     return title
+
+def calculate_fuzzy_score(finna_title, bgg_name):
+    """Calculate fuzzy similarity score between two titles"""
+    finna_norm = normalize_title_for_matching(finna_title)
+    bgg_norm = normalize_title_for_matching(bgg_name)
+    
+    # Use multiple fuzzy matching methods and take the highest score
+    ratio = fuzz.ratio(finna_norm, bgg_norm)
+    token_sort = fuzz.token_sort_ratio(finna_norm, bgg_norm)
+    
+    # Return the highest score
+    return max(ratio, token_sort)
+
+def check_fuzzy_matches(bgg_games, finna_titles, threshold=75):
+    """Check for fuzzy matches between BGG games and Finna titles"""
+    matches = []
+    
+    for game in bgg_games:
+        best_score = 0
+        best_match_name = None
+        
+        for bgg_name in game['names']:
+            for finna_title in finna_titles:
+                score = calculate_fuzzy_score(finna_title, bgg_name)
+                if score > best_score:
+                    best_score = score
+                    best_match_name = bgg_name
+        
+        if best_score >= threshold:
+            match = {**game, 'match_type': 'fuzzy', 'fuzzy_score': best_score}
+            matches.append(match)
+            tqdm.write(f"    Found fuzzy match: {best_match_name} (ID: {game['bgg_id']}, Score: {best_score})")
+    
+    return matches
+
+
+def rank_substring_matches_by_fuzzy_score(bgg_games, finna_titles):
+    """Rank substring matches by fuzzy similarity score"""
+    scored_matches = []
+    
+    for game in bgg_games:
+        for bgg_name in game['names']:
+            for finna_title in finna_titles:
+                bgg_normalized = normalize_title_for_matching(bgg_name)
+                finna_normalized = normalize_title_for_matching(finna_title)
+                
+                # Check if it's a substring match
+                if len(finna_title.split()) > 1 and finna_normalized in bgg_normalized:
+                    fuzzy_score = calculate_fuzzy_score(finna_title, bgg_name)
+                    scored_matches.append({
+                        **game, 
+                        'match_type': 'substring',
+                        'fuzzy_score': fuzzy_score,
+                        'matched_name': bgg_name
+                    })
+    
+    # Sort by fuzzy score descending and return the best match
+    if scored_matches:
+        scored_matches.sort(key=lambda x: x['fuzzy_score'], reverse=True)
+        best_match = scored_matches[0]
+        tqdm.write(f"    Best substring match: '{best_match['matched_name']}' (ID: {best_match['bgg_id']}, Score: {best_match['fuzzy_score']})")
+        return [best_match]  # Return as list for consistency
+    
+    return []
 
 def check_matches(bgg_games, finna_titles, match_type='exact'):
     """Check for matches between BGG games and Finna titles"""
@@ -265,6 +278,158 @@ def check_matches(bgg_games, finna_titles, match_type='exact'):
                         break
     
     return matches
+
+def try_exact_matches(finna_titles):
+    """
+    Try exact matches for all Finna titles.
+    
+    Args:
+        finna_titles: List of title variants to search for
+        
+    Returns:
+        List of exact matches found
+    """
+    all_matches = []
+    
+    for title in finna_titles:
+        if not title:
+            continue
+            
+        tqdm.write(f"  Exact search for: '{title}'")
+        bgg_games = search_bgg_by_title(title)
+        
+        exact_matches = check_matches(bgg_games, finna_titles, 'exact')
+        all_matches.extend(exact_matches)
+    
+    return all_matches
+
+
+def try_substring_matches_with_fuzzy_ranking(finna_titles):
+    """
+    Try substring matching with fuzzy ranking for multi-word titles.
+    
+    Single-word titles are skipped to avoid false positives.
+    Multiple candidates are ranked by fuzzy similarity score.
+    
+    Args:
+        finna_titles: List of title variants to search for
+        
+    Returns:
+        List containing the best substring match (if any)
+    """
+    tqdm.write("  Substring matching with fuzzy ranking...")
+    
+    all_substring_candidates = []
+    for title in finna_titles:
+        if not title or len(title.split()) <= 1:
+            continue  # Skip single words to avoid false positives
+            
+        tqdm.write(f"  Substring search for: '{title}'")
+        bgg_games = search_bgg_by_title(title)
+        
+        # Use fuzzy-ranked substring matching
+        substring_matches = rank_substring_matches_by_fuzzy_score(bgg_games, finna_titles)
+        all_substring_candidates.extend(substring_matches)
+    
+    # If we have substring candidates, pick the one with the highest fuzzy score
+    if all_substring_candidates:
+        all_substring_candidates.sort(key=lambda x: x['fuzzy_score'], reverse=True)
+        best_substring_match = all_substring_candidates[0]
+        return [best_substring_match]
+    
+    return []
+
+
+def try_author_fuzzy_title_matching(finna_authors, finna_titles):
+    """
+    Try author + fuzzy title matching.
+    
+    Search for games by author, then use fuzzy matching on titles.
+    
+    Args:
+        finna_authors: List of author names from Finna
+        finna_titles: List of title variants to match against
+        
+    Returns:
+        List of author+fuzzy matches found
+    """
+    tqdm.write("  Author + fuzzy title matching...")
+    all_matches = []
+    
+    for author in finna_authors[:2]:  # Try first 2 authors to avoid too many API calls
+        tqdm.write(f"  Searching by author: '{author}'")
+        author_game_ids = search_bgg_by_author(author)
+        
+        if author_game_ids:
+            # Get details for author's games
+            author_games = []
+            for game_id in author_game_ids:
+                game_details = get_bgg_game_details(game_id)
+                if game_details:
+                    # Check if author is actually in the designers
+                    if any(author.lower() in designer.lower() for designer in game_details.get('designers', [])):
+                        bgg_game = {
+                            'bgg_id': game_id,
+                            'names': game_details.get('all_names', []),
+                            'year': game_details.get('year'),
+                            'designers': game_details.get('designers', [])
+                        }
+                        author_games.append(bgg_game)
+            
+            # Try fuzzy matching with author's games
+            fuzzy_matches = check_fuzzy_matches(author_games, finna_titles, threshold=75)
+            if fuzzy_matches:
+                for match in fuzzy_matches:
+                    match['match_type'] = 'author_fuzzy_title'
+                all_matches.extend(fuzzy_matches)
+                break
+    
+    return all_matches
+
+
+def try_author_year_matching(finna_authors, finna_year):
+    """
+    Try author + exact year matching as last resort.
+    
+    Search for games by author that match the exact publication year.
+    
+    Args:
+        finna_authors: List of author names from Finna
+        finna_year: Publication year from Finna
+        
+    Returns:
+        List of author+year matches found
+    """
+    tqdm.write("  Author + exact year matching...")
+    all_matches = []
+    
+    for author in finna_authors[:2]:
+        tqdm.write(f"  Searching by author + year: '{author}' ({finna_year})")
+        author_game_ids = search_bgg_by_author(author)
+        
+        if author_game_ids:
+            for game_id in author_game_ids:
+                game_details = get_bgg_game_details(game_id)
+                if game_details:
+                    game_year = game_details.get('year')
+                    if game_year and int(game_year) == finna_year:
+                        # Check if author is in designers
+                        if any(author.lower() in designer.lower() for designer in game_details.get('designers', [])):
+                            year_match = {
+                                'bgg_id': game_id,
+                                'names': game_details.get('all_names', []),
+                                'year': game_year,
+                                'match_type': 'author_year'
+                            }
+                            all_matches.append(year_match)
+                            tqdm.write(f"    Found author+year match: {game_details.get('primary_name')} (ID: {game_id}, Year: {game_year})")
+                            break
+            
+            if all_matches:
+                break
+    
+    return all_matches
+
 
 def find_best_bgg_match(finna_game):
     """Find the best BGG match for a Finna game with multiple fallback strategies"""
@@ -293,91 +458,20 @@ def find_best_bgg_match(finna_game):
     
     all_matches = []
     
-    # STRATEGY 1: Try exact matches
-    for title in finna_titles:
-        if not title:
-            continue
-            
-        tqdm.write(f"  Strategy 1 - Exact search for: '{title}'")
-        bgg_games = search_bgg_by_title(title)
-        
-        exact_matches = check_matches(bgg_games, finna_titles, 'exact')
-        all_matches.extend(exact_matches)
+    # Try exact matches first
+    all_matches = try_exact_matches(finna_titles)
     
-    # STRATEGY 2: If no exact matches, try substring matching for multi-word titles
+    # If no exact matches, try substring matching with fuzzy ranking
     if not all_matches:
-        tqdm.write("  Strategy 2 - Substring matching...")
-        
-        for title in finna_titles:
-            if not title or len(title.split()) <= 1:
-                continue  # Skip single words to avoid false positives
-                
-            tqdm.write(f"  Substring search for: '{title}'")
-            bgg_games = search_bgg_by_title(title)
-            
-            substring_matches = check_matches(bgg_games, finna_titles, 'substring')
-            all_matches.extend(substring_matches)
+        all_matches = try_substring_matches_with_fuzzy_ranking(finna_titles)
     
-    # STRATEGY 3: Author + fuzzy title matching
+    # If still no matches and we have authors, try author + fuzzy title matching
     if not all_matches and finna_authors:
-        tqdm.write("  Strategy 3 - Author + fuzzy title matching...")
-        
-        for author in finna_authors[:2]:  # Try first 2 authors to avoid too many API calls
-            tqdm.write(f"  Searching by author: '{author}'")
-            author_game_ids = search_bgg_by_author(author)
-            
-            if author_game_ids:
-                # Get details for author's games
-                author_games = []
-                for game_id in author_game_ids:
-                    game_details = get_bgg_game_details(game_id)
-                    if game_details:
-                        # Check if author is actually in the designers
-                        if any(author.lower() in designer.lower() for designer in game_details.get('designers', [])):
-                            bgg_game = {
-                                'bgg_id': game_id,
-                                'names': game_details.get('all_names', []),
-                                'year': game_details.get('year'),
-                                'designers': game_details.get('designers', [])
-                            }
-                            author_games.append(bgg_game)
-                
-                # Try fuzzy matching with author's games
-                fuzzy_matches = check_fuzzy_matches(author_games, finna_titles, threshold=75)
-                if fuzzy_matches:
-                    for match in fuzzy_matches:
-                        match['match_type'] = 'author_fuzzy_title'
-                    all_matches.extend(fuzzy_matches)
-                    break
+        all_matches = try_author_fuzzy_title_matching(finna_authors, finna_titles)
     
-    # STRATEGY 4: Author + exact year match (last resort)
+    # Last resort: author + exact year matching
     if not all_matches and finna_authors and finna_year:
-        tqdm.write("  Strategy 4 - Author + exact year matching...")
-        
-        for author in finna_authors[:2]:
-            tqdm.write(f"  Searching by author + year: '{author}' ({finna_year})")
-            author_game_ids = search_bgg_by_author(author)
-            
-            if author_game_ids:
-                for game_id in author_game_ids:
-                    game_details = get_bgg_game_details(game_id)
-                    if game_details:
-                        game_year = game_details.get('year')
-                        if game_year and int(game_year) == finna_year:
-                            # Check if author is in designers
-                            if any(author.lower() in designer.lower() for designer in game_details.get('designers', [])):
-                                year_match = {
-                                    'bgg_id': game_id,
-                                    'names': game_details.get('all_names', []),
-                                    'year': game_year,
-                                    'match_type': 'author_year'
-                                }
-                                all_matches.append(year_match)
-                                tqdm.write(f"    Found author+year match: {game_details.get('primary_name')} (ID: {game_id}, Year: {game_year})")
-                                break
-                
-                if all_matches:
-                    break
+        all_matches = try_author_year_matching(finna_authors, finna_year)
     
     if not all_matches:
         tqdm.write("  No matches found")

@@ -4,6 +4,8 @@ import duckdb
 import pandas as pd
 import sys
 import os
+import tempfile
+import shutil
 from bggfinna import get_data_path, is_test_mode
 
 def load_csv_to_duckdb(data_dir=None, db_file=None):
@@ -24,27 +26,32 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
             print(f"Error: CSV file '{csv_file}' not found")
             return False
     
-    # Connect to DuckDB
-    conn = duckdb.connect(db_file)
+    # Create temporary database file path
+    temp_db_fd, temp_db_path = tempfile.mkstemp(suffix='.db')
+    os.close(temp_db_fd)  # Close the file descriptor, we just need the path
+    os.unlink(temp_db_path)  # Remove the empty file so DuckDB can create it
     
-    print(f"Loading CSV files from {data_dir} into DuckDB...")
+    # Connect to temporary DuckDB
+    conn = duckdb.connect(temp_db_path)
+    
+    print(f"Loading CSV files from {data_dir} into temporary DuckDB...")
     
     try:
         # Load Finna games
         conn.execute("""
-            CREATE OR REPLACE TABLE finna_games AS 
+            CREATE TABLE finna_games AS 
             SELECT * FROM read_csv_auto(?, header=true)
         """, (finna_csv,))
         
         # Load BGG-Finna relations
         conn.execute("""
-            CREATE OR REPLACE TABLE finna_bgg_relations AS 
+            CREATE TABLE finna_bgg_relations AS 
             SELECT * FROM read_csv_auto(?, header=true)
         """, (relations_csv,))
         
         # Load BGG games data
         conn.execute("""
-            CREATE OR REPLACE TABLE bgg_games AS 
+            CREATE TABLE bgg_games AS 
             SELECT * FROM read_csv_auto(?, header=true)
         """, (bgg_csv,))
         
@@ -52,7 +59,7 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         
         # Create categories table
         conn.execute("""
-            CREATE OR REPLACE TABLE categories AS
+            CREATE TABLE categories AS
             SELECT DISTINCT 
                 ROW_NUMBER() OVER (ORDER BY category) as category_id,
                 category
@@ -66,7 +73,7 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         
         # Create mechanics table
         conn.execute("""
-            CREATE OR REPLACE TABLE mechanics AS
+            CREATE TABLE mechanics AS
             SELECT DISTINCT 
                 ROW_NUMBER() OVER (ORDER BY mechanic) as mechanic_id,
                 mechanic
@@ -78,33 +85,35 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
             WHERE mechanic != ''
         """)
         
-        # Create main games table by joining Finna and BGG data
+        # Create main games view by joining Finna and BGG data
         conn.execute("""
-            CREATE OR REPLACE TABLE games AS
+            CREATE VIEW games AS
             SELECT 
                 f.*,
-                b.primary_name,
-                b.all_names,
-                b.year,
-                b.description,
-                b.min_players,
-                b.max_players,
-                b.playing_time,
-                b.min_play_time,
-                b.max_play_time,
-                b.min_age,
-                b.categories,
-                b.mechanics,
-                b.families,
-                b.designers,
-                b.artists,
-                b.publishers,
+                r.bgg_id,
+                r.match_type,
+                b.primary_name as bgg_primary_name,
+                b.all_names as bgg_all_names,
+                b.year as bgg_year,
+                b.description as bgg_description,
+                b.min_players as bgg_min_players,
+                b.max_players as bgg_max_players,
+                b.playing_time as bgg_playing_time,
+                b.min_play_time as bgg_min_play_time,
+                b.max_play_time as bgg_max_play_time,
+                b.min_age as bgg_min_age,
+                b.categories as bgg_categories,
+                b.mechanics as bgg_mechanics,
+                b.families as bgg_families,
+                b.designers as bgg_designers,
+                b.artists as bgg_artists,
+                b.publishers as bgg_publishers,
                 b.bgg_rank,
-                b.average_rating,
-                b.bayes_average,
-                b.users_rated,
-                b.weight,
-                b.owned,
+                b.average_rating as bgg_average_rating,
+                b.bayes_average as bgg_bayes_average,
+                b.users_rated as bgg_users_rated,
+                b.weight as bgg_weight,
+                b.owned as bgg_owned,
                 (r.bgg_id IS NOT NULL AND r.bgg_id::VARCHAR != '') as has_bgg_match,
                 TRUE as library_available
             FROM finna_games f
@@ -114,7 +123,7 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         
         # Create game_categories junction table
         conn.execute("""
-            CREATE OR REPLACE TABLE game_categories AS
+            CREATE TABLE game_categories AS
             SELECT DISTINCT
                 g.bgg_id as game_id,
                 c.category_id
@@ -126,7 +135,7 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         
         # Create game_mechanics junction table
         conn.execute("""
-            CREATE OR REPLACE TABLE game_mechanics AS
+            CREATE TABLE game_mechanics AS
             SELECT DISTINCT
                 g.bgg_id as game_id,
                 m.mechanic_id
@@ -139,13 +148,14 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         # Drop the raw table
         # Keep the original tables for reference
         
-        print("Creating indexes...")
-        # Create indexes for better query performance
-        conn.execute("CREATE INDEX idx_games_bgg_rating ON games(bayes_average)")
-        conn.execute("CREATE INDEX idx_games_bgg_rank ON games(bgg_rank)")
-        conn.execute("CREATE INDEX idx_games_title ON games(primary_name)")
-        conn.execute("CREATE INDEX idx_games_has_bgg ON games(has_bgg_match)")
-        conn.execute("CREATE INDEX idx_games_id ON games(id)")
+        print("Creating indexes on base tables...")
+        # Create indexes on base tables for better query performance
+        conn.execute("CREATE INDEX idx_finna_games_id ON finna_games(id)")
+        conn.execute("CREATE INDEX idx_finna_bgg_relations_finna_id ON finna_bgg_relations(finna_id)")
+        conn.execute("CREATE INDEX idx_finna_bgg_relations_bgg_id ON finna_bgg_relations(bgg_id)")
+        conn.execute("CREATE INDEX idx_bgg_games_bgg_id ON bgg_games(bgg_id)")
+        conn.execute("CREATE INDEX idx_bgg_games_rank ON bgg_games(bgg_rank)")
+        conn.execute("CREATE INDEX idx_bgg_games_rating ON bgg_games(bayes_average)")
         
         # Junction table indexes
         conn.execute("CREATE INDEX idx_game_categories_game ON game_categories(game_id)")
@@ -168,10 +178,10 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         # Show sample data
         print("\nSample of loaded data:")
         sample = conn.execute("""
-            SELECT title, primary_name, bayes_average, bgg_rank
+            SELECT title, bgg_primary_name, bgg_bayes_average, bgg_rank
             FROM games 
-            WHERE has_bgg_match = TRUE AND bayes_average IS NOT NULL
-            ORDER BY bayes_average DESC 
+            WHERE has_bgg_match = TRUE AND bgg_bayes_average IS NOT NULL
+            ORDER BY bgg_bayes_average DESC 
             LIMIT 5
         """).fetchall()
         
@@ -189,10 +199,21 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         for mech in mechs:
             print(f"  - {mech[0]}")
         
-        return True
-        
-    finally:
+    except Exception as e:
         conn.close()
+        # Clean up temporary file on error
+        if os.path.exists(temp_db_path):
+            os.unlink(temp_db_path)
+        raise e
+    else:
+        # Close connection before moving file
+        conn.close()
+        
+        # Move temporary database to final location
+        print(f"Moving database to final location: {db_file}")
+        shutil.move(temp_db_path, db_file)
+        
+        return True
 
 def main():
     # Parse command line arguments with test mode support  
