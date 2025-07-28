@@ -2,15 +2,31 @@
 
 import csv
 import sys
+import argparse
+import os
 from tqdm import tqdm
 from bggfinna import (get_processed_ids, truncate_incomplete_output, should_write_header,
-                     get_bgg_game_details, get_unique_bgg_ids, get_data_path, is_test_mode)
+                     get_bgg_game_details, get_unique_bgg_ids, get_data_path, is_test_mode,
+                     get_stale_bgg_ids, get_current_timestamp)
 
 
 def main():
-    # Parse arguments with test mode support
-    relations_file = sys.argv[1] if len(sys.argv) > 1 else get_data_path('finna_bgg_relations.csv')
-    output_file = sys.argv[2] if len(sys.argv) > 2 else get_data_path('bgg_games.csv')
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Fetch BGG game details with incremental updates')
+    parser.add_argument('relations_file', nargs='?', default=None,
+                       help='Input relations CSV file')
+    parser.add_argument('output_file', nargs='?', default=None,
+                       help='Output BGG games CSV file')
+    parser.add_argument('--reset', action='store_true',
+                       help='Force full refresh, ignoring existing timestamps')
+    parser.add_argument('--max-age', type=int, default=30,
+                       help='Maximum age in days before a record is considered stale (default: 30)')
+    
+    args = parser.parse_args()
+    
+    # Set file paths with test mode support
+    relations_file = args.relations_file or get_data_path('finna_bgg_relations.csv')
+    output_file = args.output_file or get_data_path('bgg_games.csv')
     
     if is_test_mode():
         print("Running in TEST mode - outputs will go to data/test/")
@@ -25,8 +41,23 @@ def main():
     # Get already processed BGG IDs
     processed_bgg_ids = get_processed_ids(output_file, 'bgg_id')
     
-    # Get unprocessed BGG IDs using set difference
-    unprocessed_bgg_ids = [bgg_id for bgg_id in all_bgg_ids if bgg_id not in processed_bgg_ids]
+    # Determine which BGG IDs need updating
+    if args.reset:
+        print("Full reset requested - will fetch all BGG IDs")
+        unprocessed_bgg_ids = all_bgg_ids
+        processed_bgg_ids = set()  # Reset processed set for accurate counting
+    else:
+        # Get stale BGG IDs (old or missing timestamps)
+        stale_bgg_ids = get_stale_bgg_ids(output_file, args.max_age)
+        
+        # Get unprocessed BGG IDs (not in CSV at all)
+        new_bgg_ids = [bgg_id for bgg_id in all_bgg_ids if bgg_id not in processed_bgg_ids]
+        
+        # Combine new and stale IDs
+        unprocessed_bgg_ids = list(set(new_bgg_ids) | stale_bgg_ids)
+        
+        if stale_bgg_ids:
+            print(f"Found {len(stale_bgg_ids)} stale records (older than {args.max_age} days)")
     
     total_ids = len(all_bgg_ids)
     processed_count = len(processed_bgg_ids)
@@ -37,21 +68,39 @@ def main():
         print("All BGG games already processed!")
         return
     
-    # Determine file mode and whether to write header
-    write_header = should_write_header(output_file)
-    mode = 'w' if write_header else 'a'
+    # For incremental updates, we need to rebuild the entire file
+    # Load existing records that don't need updating
+    existing_records = {}
+    if not args.reset and os.path.exists(output_file):
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    bgg_id = row.get('bgg_id', '').strip()
+                    if bgg_id and bgg_id not in unprocessed_bgg_ids:
+                        # This record doesn't need updating, keep it
+                        existing_records[bgg_id] = row
+        except Exception:
+            # If file is corrupt, just start fresh
+            existing_records = {}
     
-    with open(output_file, mode, newline='', encoding='utf-8') as csvfile:
+    # Write the complete file (existing + updated records)
+    with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['bgg_id', 'primary_name', 'all_names', 'year', 'description', 
                      'min_players', 'max_players', 'playing_time', 'min_play_time', 
                      'max_play_time', 'min_age', 'categories', 'mechanics', 'families', 
                      'designers', 'artists', 'publishers', 'bgg_rank', 'average_rating', 
-                     'bayes_average', 'users_rated', 'weight', 'owned']
+                     'bayes_average', 'users_rated', 'weight', 'owned', 'last_updated']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
         
-        if write_header:
-            writer.writeheader()
+        # First, write existing records that don't need updating
+        for record in existing_records.values():
+            # Ensure the record has all required fields (for backward compatibility)
+            complete_record = {field: record.get(field, '') for field in fieldnames}
+            writer.writerow(complete_record)
         
+        # Then fetch and write updated records
         with tqdm(total=len(unprocessed_bgg_ids), desc="Fetching BGG games", unit="games") as pbar:
             for bgg_id in unprocessed_bgg_ids:
                 pbar.set_description(f"Fetching BGG ID: {bgg_id}")
@@ -83,7 +132,8 @@ def main():
                         'bayes_average': bgg_details['bayes_average'],
                         'users_rated': bgg_details['users_rated'],
                         'weight': bgg_details['weight'],
-                        'owned': bgg_details['owned']
+                        'owned': bgg_details['owned'],
+                        'last_updated': get_current_timestamp()
                     }
                     
                     pbar.set_postfix_str(f"✓ {result['primary_name'][:20]}...")
@@ -112,7 +162,8 @@ def main():
                         'bayes_average': '',
                         'users_rated': '',
                         'weight': '',
-                        'owned': ''
+                        'owned': '',
+                        'last_updated': get_current_timestamp()
                     }
                     pbar.set_postfix_str(f"✗ Failed: {bgg_id}")
                 

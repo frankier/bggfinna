@@ -157,6 +157,13 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         conn.execute("CREATE INDEX idx_bgg_games_rank ON bgg_games(bgg_rank)")
         conn.execute("CREATE INDEX idx_bgg_games_rating ON bgg_games(bayes_average)")
         
+        # Add index on timestamp if column exists (for backward compatibility)
+        try:
+            conn.execute("CREATE INDEX idx_bgg_games_updated ON bgg_games(last_updated)")
+        except Exception:
+            # Column might not exist in older CSV files, skip index creation
+            pass
+        
         # Junction table indexes
         conn.execute("CREATE INDEX idx_game_categories_game ON game_categories(game_id)")
         conn.execute("CREATE INDEX idx_game_categories_cat ON game_categories(category_id)")

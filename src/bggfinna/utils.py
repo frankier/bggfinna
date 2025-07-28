@@ -8,6 +8,7 @@ import os
 import requests
 import xml.etree.ElementTree as ET
 import time
+from datetime import datetime, timedelta
 from tqdm import tqdm
 
 
@@ -287,3 +288,58 @@ def get_unique_bgg_ids(relations_file):
                 bgg_ids.add(bgg_id)
     
     return sorted(list(bgg_ids))
+
+
+def get_stale_bgg_ids(bgg_games_file, max_age_days=30):
+    """
+    Get BGG IDs of records that are older than max_age_days or don't have timestamps.
+    
+    Args:
+        bgg_games_file: Path to the BGG games CSV file
+        max_age_days: Maximum age in days before a record is considered stale
+    
+    Returns:
+        set: Set of BGG IDs that need updating
+    """
+    if not os.path.exists(bgg_games_file):
+        return set()
+    
+    stale_ids = set()
+    cutoff_date = datetime.now() - timedelta(days=max_age_days)
+    
+    try:
+        with open(bgg_games_file, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                bgg_id = row.get('bgg_id', '').strip()
+                if not bgg_id:
+                    continue
+                
+                last_updated_str = row.get('last_updated', '').strip()
+                if not last_updated_str:
+                    # No timestamp means it's old format, needs updating
+                    stale_ids.add(bgg_id)
+                    continue
+                
+                try:
+                    last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                    # Convert to naive datetime for comparison (assuming UTC)
+                    if last_updated.tzinfo:
+                        last_updated = last_updated.replace(tzinfo=None)
+                    
+                    if last_updated < cutoff_date:
+                        stale_ids.add(bgg_id)
+                except ValueError:
+                    # Invalid timestamp format, treat as stale
+                    stale_ids.add(bgg_id)
+    
+    except Exception:
+        # If file is corrupt, return empty set (let normal processing handle it)
+        return set()
+    
+    return stale_ids
+
+
+def get_current_timestamp():
+    """Get current timestamp in ISO 8601 format"""
+    return datetime.now().isoformat()
