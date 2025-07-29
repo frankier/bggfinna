@@ -38,10 +38,7 @@ jobs:
           # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4)
           # model: "claude-opus-4-20250514"
           
-          # Custom trigger phrase for code reviews
-          trigger_phrase: "@claudereview"
-          
-          # Direct prompt for when @claudereview is mentioned
+          # Direct prompt for when @claudereview is mentioned  
           direct_prompt: |
             Please review this pull request and provide feedback on:
             - Code quality and best practices
