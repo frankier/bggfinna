@@ -6,7 +6,7 @@ import sys
 import os
 import tempfile
 import shutil
-from bggfinna import get_data_path, is_test_mode
+from bggfinna import get_data_path, is_test_mode, is_smoke_test_mode
 
 def load_csv_to_duckdb(data_dir=None, db_file=None):
     """Load all CSV data into DuckDB database"""
@@ -227,7 +227,9 @@ def main():
     data_dir = sys.argv[1] if len(sys.argv) > 1 else get_data_path('')
     db_file = sys.argv[2] if len(sys.argv) > 2 else get_data_path('boardgames.db')
     
-    if is_test_mode():
+    if is_smoke_test_mode():
+        print("Running in SMOKE TEST mode - outputs will go to data/smoke/")
+    elif is_test_mode():
         print("Running in TEST mode - outputs will go to data/test/")
     
     success = load_csv_to_duckdb(data_dir, db_file)

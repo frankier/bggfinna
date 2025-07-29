@@ -11,7 +11,7 @@ import subprocess
 import sys
 import os
 import time
-from bggfinna import get_data_path, is_test_mode
+from bggfinna import get_data_path, is_test_mode, is_smoke_test_mode
 
 def run_command(cmd, description):
     """Run a command and handle errors"""
@@ -48,7 +48,10 @@ def main():
     print("BOARD GAME LIBRARY DATABASE CREATION PIPELINE")
     print("=" * 60)
     
-    if is_test_mode():
+    if is_smoke_test_mode():
+        print("🚨 SMOKE TEST MODE ENABLED - Processing 1 record, outputs will go to data/smoke/")
+        print("=" * 60)
+    elif is_test_mode():
         print("🧪 TEST MODE ENABLED - All outputs will go to data/test/")
         print("=" * 60)
     

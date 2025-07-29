@@ -12,7 +12,7 @@ import json
 from urllib.parse import quote
 from tqdm import tqdm
 from fuzzywuzzy import fuzz
-from bggfinna import get_unprocessed_items, should_write_header, get_bgg_game_details, get_data_path, is_test_mode
+from bggfinna import get_unprocessed_items, should_write_header, get_bgg_game_details, get_data_path, is_test_mode, get_test_limit, is_smoke_test_mode
 from bggfinna.bggapi import search_bgg_by_title, search_bgg_by_author
 
 def extract_authors_from_finna(authors_json):
@@ -516,7 +516,9 @@ def main():
     input_file = sys.argv[1] if len(sys.argv) > 1 else get_data_path('finna_board_games.csv')
     output_file = sys.argv[2] if len(sys.argv) > 2 else get_data_path('finna_bgg_relations.csv')
     
-    if is_test_mode():
+    if is_smoke_test_mode():
+        print("Running in SMOKE TEST mode - outputs will go to data/smoke/")
+    elif is_test_mode():
         print("Running in TEST mode - outputs will go to data/test/")
     
     # Read all Finna games
