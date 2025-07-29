@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)"
+    ],
+    "deny": []
+  },
+  "pullRequestMode": {
+    "enabled": true,
+    "defaultBaseBranch": "main",
+    "branchPrefix": "claude-",
+    "autoCreatePullRequest": true
+  }
+}

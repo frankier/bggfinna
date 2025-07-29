@@ -5,7 +5,7 @@ import csv
 import sys
 from urllib.parse import urlencode
 from tqdm import tqdm
-from bggfinna import get_data_path, is_test_mode
+from bggfinna import get_data_path, is_test_mode, get_test_limit, is_smoke_test_mode
 
 def fetch_and_save_board_games(filename=None):
     """Fetch all board games from keski.finna.fi and save directly to CSV"""
@@ -54,8 +54,9 @@ def fetch_and_save_board_games(filename=None):
             return 0
         
         total_count = data.get('resultCount', 0)
-        if is_test_mode():
-            total_count = min(total_count, 10)
+        test_limit = get_test_limit()
+        if test_limit is not None:
+            total_count = min(total_count, test_limit)
         
     except requests.exceptions.RequestException as e:
         print(f"Request failed: {e}")
@@ -148,7 +149,9 @@ def fetch_and_save_board_games(filename=None):
 
 
 def main():
-    if is_test_mode():
+    if is_smoke_test_mode():
+        print("Running in SMOKE TEST mode - limiting to 1 record, outputs will go to data/smoke/")
+    elif is_test_mode():
         print("Running in TEST mode - limiting to 10 records, outputs will go to data/test/")
     
     total_records = fetch_and_save_board_games()

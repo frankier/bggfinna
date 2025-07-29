@@ -7,7 +7,7 @@ import os
 from tqdm import tqdm
 from bggfinna import (get_processed_ids, truncate_incomplete_output, should_write_header,
                      get_bgg_game_details, get_unique_bgg_ids, get_data_path, is_test_mode,
-                     get_stale_bgg_ids, get_current_timestamp)
+                     get_stale_bgg_ids, get_current_timestamp, get_test_limit, is_smoke_test_mode)
 
 
 def main():
@@ -28,7 +28,9 @@ def main():
     relations_file = args.relations_file or get_data_path('finna_bgg_relations.csv')
     output_file = args.output_file or get_data_path('bgg_games.csv')
     
-    if is_test_mode():
+    if is_smoke_test_mode():
+        print("Running in SMOKE TEST mode - outputs will go to data/smoke/")
+    elif is_test_mode():
         print("Running in TEST mode - outputs will go to data/test/")
     
     # Truncate any incomplete output

@@ -18,9 +18,29 @@ def is_test_mode():
     return bool(os.environ.get('BGGFINNA_TEST'))
 
 
+def is_smoke_test_mode():
+    """Check if running in smoke test mode (single record)"""
+    return os.environ.get('BGGFINNA_TEST') == '2'
+
+
+def get_test_limit():
+    """Get the record limit for test modes"""
+    test_env = os.environ.get('BGGFINNA_TEST')
+    if test_env == '2':
+        return 1  # Single record for smoke tests
+    elif test_env:
+        return 10  # Small batch for regular tests
+    else:
+        return None  # No limit for production
+
+
 def get_data_path(filename):
     """Get the appropriate data path (test or production)"""
-    if is_test_mode():
+    if is_smoke_test_mode():
+        smoke_dir = 'data/smoke'
+        os.makedirs(smoke_dir, exist_ok=True)
+        return os.path.join(smoke_dir, filename)
+    elif is_test_mode():
         test_dir = 'data/test'
         os.makedirs(test_dir, exist_ok=True)
         return os.path.join(test_dir, filename)
