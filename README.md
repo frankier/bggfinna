@@ -2,6 +2,8 @@
 
 Discover the top-rated board games available in Finnish libraries by combining data from the Finna API with BoardGameGeek (BGG) ratings and metadata.
 
+[![GitHub](https://img.shields.io/badge/GitHub-frankier%2Fbggfinna-blue)](https://github.com/frankier/bggfinna)
+
 ## Overview
 
 This pipeline fetches board game data from Finnish libraries via the Finna API, matches games with their BoardGameGeek counterparts to obtain ratings and detailed metadata, and creates a searchable database. A Streamlit dashboard provides an interactive interface to explore the data.
