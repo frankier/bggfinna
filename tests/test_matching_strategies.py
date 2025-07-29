@@ -280,7 +280,7 @@ def test_find_best_bgg_match_alternative_titles(monkeypatch):
 def test_search_bgg_by_author_success(monkeypatch):
     """Test successful author search using mocked APIs"""
     
-    def mock_requests_get(url, timeout=None):
+    def mock_requests_get(url, **kwargs):
         class MockResponse:
             def __init__(self, content, status_code=200):
                 self.content = content
@@ -289,7 +289,8 @@ def test_search_bgg_by_author_success(monkeypatch):
             def raise_for_status(self):
                 pass
         
-        if "search" in url and "Reiner+Knizia" in url:
+        
+        if "search" in url and ("Reiner+Knizia" in url or "Reiner%20Knizia" in url):
             # Mock designer search response
             xml_content = '''<?xml version="1.0" encoding="utf-8"?>
             <items total="1" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
@@ -312,7 +313,16 @@ def test_search_bgg_by_author_success(monkeypatch):
         
         return MockResponse(b'', 404)
     
-    monkeypatch.setattr('bggfinna.bggapi.requests.get', mock_requests_get)
+    import bggfinna.bggapi
+    import requests
+    
+    # Create a proper mock requests module with exceptions
+    class MockRequests:
+        def __init__(self):
+            self.get = mock_requests_get
+            self.exceptions = requests.exceptions
+    
+    monkeypatch.setattr(bggfinna.bggapi, 'requests', MockRequests())
     
     game_ids = search_bgg_by_author('Reiner Knizia')
     assert len(game_ids) == 3
@@ -324,7 +334,7 @@ def test_search_bgg_by_author_success(monkeypatch):
 def test_search_bgg_by_author_no_designer_found(monkeypatch):
     """Test author search when designer is not found"""
     
-    def mock_requests_get(url, timeout=None):
+    def mock_requests_get(url, **kwargs):
         class MockResponse:
             def __init__(self, content, status_code=200):
                 self.content = content
@@ -342,7 +352,15 @@ def test_search_bgg_by_author_no_designer_found(monkeypatch):
         
         return MockResponse(b'', 404)
     
-    monkeypatch.setattr('bggfinna.bggapi.requests.get', mock_requests_get)
+    import bggfinna.bggapi
+    import requests
+    
+    class MockRequests:
+        def __init__(self):
+            self.get = mock_requests_get
+            self.exceptions = requests.exceptions
+    
+    monkeypatch.setattr(bggfinna.bggapi, 'requests', MockRequests())
     
     game_ids = search_bgg_by_author('Unknown Designer')
     assert len(game_ids) == 0
@@ -351,11 +369,19 @@ def test_search_bgg_by_author_no_designer_found(monkeypatch):
 def test_search_bgg_by_author_api_error(monkeypatch):
     """Test author search when API requests fail"""
     
-    def mock_requests_get(url, timeout=None):
+    def mock_requests_get(url, **kwargs):
         import requests
         raise requests.exceptions.RequestException("API error")
     
-    monkeypatch.setattr('bggfinna.bggapi.requests.get', mock_requests_get)
+    import bggfinna.bggapi
+    import requests
+    
+    class MockRequests:
+        def __init__(self):
+            self.get = mock_requests_get
+            self.exceptions = requests.exceptions
+    
+    monkeypatch.setattr(bggfinna.bggapi, 'requests', MockRequests())
     
     game_ids = search_bgg_by_author('Some Designer')
     assert len(game_ids) == 0
@@ -364,7 +390,7 @@ def test_search_bgg_by_author_api_error(monkeypatch):
 def test_search_bgg_by_author_invalid_json(monkeypatch):
     """Test author search when games API returns invalid JSON"""
     
-    def mock_requests_get(url, timeout=None):
+    def mock_requests_get(url, **kwargs):
         class MockResponse:
             def __init__(self, content, status_code=200):
                 self.content = content
@@ -389,7 +415,15 @@ def test_search_bgg_by_author_invalid_json(monkeypatch):
         
         return MockResponse(b'', 404)
     
-    monkeypatch.setattr('bggfinna.bggapi.requests.get', mock_requests_get)
+    import bggfinna.bggapi
+    import requests
+    
+    class MockRequests:
+        def __init__(self):
+            self.get = mock_requests_get
+            self.exceptions = requests.exceptions
+    
+    monkeypatch.setattr(bggfinna.bggapi, 'requests', MockRequests())
     
     game_ids = search_bgg_by_author('Test Designer')
     assert len(game_ids) == 0
