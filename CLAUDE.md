@@ -33,13 +33,15 @@ A Streamlit dashboard allows the user to browse the database.
 
 This repository uses a PR-based development workflow:
 
-1. **Making Changes**: When requesting changes from Claude Code, work will be done on feature branches (prefixed with `claude-`)
-2. **Automatic PRs**: Claude Code will automatically create pull requests for changes
-3. **CI Testing**: GitHub Actions runs three test jobs on every PR:
+1. **Before Starting**: Always pull the latest main branch before starting new work
+2. **Making Changes**: When requesting changes from Claude Code, work will be done on feature branches (prefixed with `claude-`)
+3. **Automatic PRs**: Claude Code will automatically create pull requests for changes
+4. **CI Testing**: GitHub Actions runs three test jobs on every PR:
    - **Smoke Test**: Complete pipeline with 1 record (`BGGFINNA_TEST=2`)
    - **Unit Tests**: Existing pytest test suite
    - **Integration Test**: Full pipeline with limited data (`BGGFINNA_TEST=1`)
-4. **Review & Merge**: Review PRs in GitHub before merging to main branch
+5. **Code Review**: Comment `@claudereview` on PRs to trigger automated Claude code review
+6. **Review & Merge**: Review PRs in GitHub before merging to main branch
 
 ## Testing
 
