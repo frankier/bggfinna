@@ -154,30 +154,6 @@ def parse_bgg_thing_response(xml_content):
         tqdm.write(f"Error parsing BGG thing XML: {e}")
         return None
 
-def get_bgg_game_details(bgg_id, max_retries=3):
-    """Get detailed game info from BGG thing API"""
-    url = f"https://boardgamegeek.com/xmlapi2/thing?id={bgg_id}&stats=1"
-    
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            
-            if response.status_code == 202:
-                # BGG is processing, wait and retry
-                time.sleep(2)
-                continue
-            else:
-                time.sleep(1)
-                
-            return parse_bgg_thing_response(response.content)
-            
-        except requests.exceptions.RequestException as e:
-            tqdm.write(f"Request failed for BGG ID {bgg_id} (attempt {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                time.sleep(1)
-    
-    return None
 
 
 def normalize_title_for_matching(title):

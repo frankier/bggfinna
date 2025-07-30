@@ -34,10 +34,6 @@ RUN ln -sf /usr/bin/python3.11 /usr/local/bin/python && \
 # Switch to vscode user for remaining setup
 USER vscode
 
-# Install uv package manager
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
-
 # Install uv for vscode user
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/vscode/.cargo/bin:$PATH"
@@ -51,12 +47,15 @@ RUN echo 'alias ll="ls -la"' >> /home/vscode/.bashrc && \
     echo 'alias pytest="uv run pytest"' >> /home/vscode/.bashrc && \
     echo 'alias streamlit="uv run streamlit"' >> /home/vscode/.bashrc
 
+RUN mkdir -p /workspaces/bggfinna && \
+    chown -R vscode:vscode /workspaces/bggfinna
+
 # Set working directory
 WORKDIR /workspaces/bggfinna
 
 # Copy project files and install dependencies
 COPY --chown=vscode:vscode pyproject.toml uv.lock ./
-RUN uv sync --group test
+RUN uv sync --locked --group test
 
 # Expose Streamlit port
 EXPOSE 8501

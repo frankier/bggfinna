@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 import time
 from datetime import datetime, timedelta
 from tqdm import tqdm
+from .retry_config import bgg_api_retry
 
 
 # Test mode configuration
@@ -270,30 +271,20 @@ def parse_bgg_thing_response(xml_content):
         return None
 
 
-def get_bgg_game_details(bgg_id, max_retries=3):
+@bgg_api_retry
+def get_bgg_game_details(bgg_id):
     """Get detailed game info from BGG thing API"""
     url = f"https://boardgamegeek.com/xmlapi2/thing?id={bgg_id}&stats=1"
     
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            
-            if response.status_code == 202:
-                # BGG is processing, wait and retry
-                time.sleep(2)
-                continue
-            else:
-                time.sleep(1)
-                
-            return parse_bgg_thing_response(response.content)
-            
-        except requests.exceptions.RequestException as e:
-            tqdm.write(f"Request failed for BGG ID {bgg_id} (attempt {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                time.sleep(1)
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
     
-    return None
+    if response.status_code == 202:
+        # BGG is processing, return response to trigger retry
+        return response
+    
+    time.sleep(1)  # Rate limiting
+    return parse_bgg_thing_response(response.content)
 
 
 def get_unique_bgg_ids(relations_file):

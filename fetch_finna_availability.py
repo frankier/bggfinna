@@ -14,84 +14,70 @@ import time
 from urllib.parse import urlencode
 from tqdm import tqdm
 from bggfinna import get_data_path, get_unprocessed_items, should_write_header, is_test_mode, get_test_limit, is_smoke_test_mode
+from bggfinna.retry_config import finna_api_retry
 
 
-def fetch_game_availability(game_id, max_retries=3):
+@finna_api_retry
+def fetch_game_availability(game_id):
     """
     Fetch detailed availability/location information for a single game.
     
     Args:
         game_id: Finna record ID (e.g., 'keski.3376040')
-        max_retries: Number of retry attempts for failed requests
     
     Returns:
         dict: Availability information or None if failed
     """
     url = f"https://api.finna.fi/v1/record?id={game_id}"
     
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            if data.get('status') != 'OK' or not data.get('records'):
-                tqdm.write(f"No record found for {game_id}")
-                return None
-            
-            record = data['records'][0]
-            
-            # Extract location/availability information
-            availability_info = {
-                'finna_id': game_id,
-                'title': record.get('title', ''),
-                'buildings': [],
-                'locations': [],
-                'organizations': []
-            }
-            
-            # Process buildings information (library locations)
-            buildings = record.get('buildings', [])
-            for building in buildings:
-                building_info = {
-                    'value': building.get('value', ''),
-                    'name': building.get('translated', building.get('value', ''))
-                }
-                availability_info['buildings'].append(building_info)
-                
-                # Extract organization and location details
-                value_parts = building.get('value', '').split('/')
-                if len(value_parts) >= 2:
-                    org = value_parts[1] if value_parts[1] else 'Unknown'
-                    if org not in availability_info['organizations']:
-                        availability_info['organizations'].append(org)
-                
-                # Add location name to locations list
-                location_name = building.get('translated', building.get('value', ''))
-                if location_name and location_name not in availability_info['locations']:
-                    availability_info['locations'].append(location_name)
-            
-            # Convert lists to strings for CSV storage
-            availability_info['buildings_json'] = json.dumps(availability_info['buildings'])
-            availability_info['locations_str'] = '; '.join(availability_info['locations'])
-            availability_info['organizations_str'] = '; '.join(availability_info['organizations'])
-            availability_info['num_locations'] = len(availability_info['buildings'])
-            
-            time.sleep(0.5)  # Be respectful to the API
-            return availability_info
-            
-        except requests.exceptions.RequestException as e:
-            tqdm.write(f"Request failed for {game_id} (attempt {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                time.sleep(1)
-        except json.JSONDecodeError as e:
-            tqdm.write(f"JSON decode error for {game_id}: {e}")
-            break
-        except Exception as e:
-            tqdm.write(f"Unexpected error for {game_id}: {e}")
-            break
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
     
-    return None
+    data = response.json()
+    if data.get('status') != 'OK' or not data.get('records'):
+        tqdm.write(f"No record found for {game_id}")
+        return None
+    
+    record = data['records'][0]
+    
+    # Extract location/availability information
+    availability_info = {
+        'finna_id': game_id,
+        'title': record.get('title', ''),
+        'buildings': [],
+        'locations': [],
+        'organizations': []
+    }
+    
+    # Process buildings information (library locations)
+    buildings = record.get('buildings', [])
+    for building in buildings:
+        building_info = {
+            'value': building.get('value', ''),
+            'name': building.get('translated', building.get('value', ''))
+        }
+        availability_info['buildings'].append(building_info)
+        
+        # Extract organization and location details
+        value_parts = building.get('value', '').split('/')
+        if len(value_parts) >= 2:
+            org = value_parts[1] if value_parts[1] else 'Unknown'
+            if org not in availability_info['organizations']:
+                availability_info['organizations'].append(org)
+        
+        # Add location name to locations list
+        location_name = building.get('translated', building.get('value', ''))
+        if location_name and location_name not in availability_info['locations']:
+            availability_info['locations'].append(location_name)
+    
+    # Convert lists to strings for CSV storage
+    availability_info['buildings_json'] = json.dumps(availability_info['buildings'])
+    availability_info['locations_str'] = '; '.join(availability_info['locations'])
+    availability_info['organizations_str'] = '; '.join(availability_info['organizations'])
+    availability_info['num_locations'] = len(availability_info['buildings'])
+    
+    time.sleep(0.5)  # Be respectful to the API
+    return availability_info
 
 
 def main():
