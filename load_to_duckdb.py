@@ -19,9 +19,10 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
     finna_csv = os.path.join(data_dir, 'finna_board_games.csv')
     relations_csv = os.path.join(data_dir, 'finna_bgg_relations.csv')
     bgg_csv = os.path.join(data_dir, 'bgg_games.csv')
+    availability_csv = os.path.join(data_dir, 'finna_availability.csv')
     
     # Check if all CSV files exist
-    for csv_file in [finna_csv, relations_csv, bgg_csv]:
+    for csv_file in [finna_csv, relations_csv, bgg_csv, availability_csv]:
         if not os.path.exists(csv_file):
             print(f"Error: CSV file '{csv_file}' not found")
             return False
@@ -55,6 +56,12 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
             SELECT * FROM read_csv_auto(?, header=true)
         """, (bgg_csv,))
         
+        # Load Finna availability data
+        conn.execute("""
+            CREATE TABLE finna_availability AS 
+            SELECT * FROM read_csv_auto(?, header=true)
+        """, (availability_csv,))
+        
         print("Normalizing categories and mechanics...")
         
         # Create categories table
@@ -85,7 +92,7 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
             WHERE mechanic != ''
         """)
         
-        # Create main games view by joining Finna and BGG data
+        # Create main games view by joining Finna, BGG, and availability data
         conn.execute("""
             CREATE VIEW games AS
             SELECT 
@@ -114,11 +121,16 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
                 b.users_rated as bgg_users_rated,
                 b.weight as bgg_weight,
                 b.owned as bgg_owned,
+                a.num_locations,
+                a.locations_str,
+                a.organizations_str,
+                a.buildings_json,
                 (r.bgg_id IS NOT NULL AND r.bgg_id::VARCHAR != '') as has_bgg_match,
                 TRUE as library_available
             FROM finna_games f
             LEFT JOIN finna_bgg_relations r ON f.id = r.finna_id
             LEFT JOIN bgg_games b ON r.bgg_id = b.bgg_id
+            LEFT JOIN finna_availability a ON f.id = a.finna_id
         """)
         
         # Create game_categories junction table
@@ -156,6 +168,7 @@ def load_csv_to_duckdb(data_dir=None, db_file=None):
         conn.execute("CREATE INDEX idx_bgg_games_bgg_id ON bgg_games(bgg_id)")
         conn.execute("CREATE INDEX idx_bgg_games_rank ON bgg_games(bgg_rank)")
         conn.execute("CREATE INDEX idx_bgg_games_rating ON bgg_games(bayes_average)")
+        conn.execute("CREATE INDEX idx_finna_availability_finna_id ON finna_availability(finna_id)")
         
         # Add index on timestamp if column exists (for backward compatibility)
         try:

@@ -4,7 +4,8 @@ Pipeline script to run the entire database creation process:
 1. Fetch Finna board games data
 2. Match Finna games with BGG (creates relations)
 3. Fetch unique BGG game details
-4. Load all data into DuckDB
+4. Fetch Finna availability/location information
+5. Load all data into DuckDB
 """
 
 import subprocess
@@ -91,15 +92,26 @@ def main():
         print("Step 3 output file missing")
         return 1
     
-    # Step 4: Load into DuckDB
-    step4_cmd = '. "$HOME/.cargo/env" && uv run python load_to_duckdb.py'
-    if not run_command(step4_cmd, "Load data into DuckDB database"):
+    # Step 4: Fetch Finna availability information
+    step4_cmd = '. "$HOME/.cargo/env" && uv run python fetch_finna_availability.py'
+    if not run_command(step4_cmd, "Fetch Finna availability/location information"):
         print("Pipeline failed at step 4")
         return 1
     
     # Check Step 4 output
-    if not check_file_exists(get_data_path('boardgames.db'), 'DuckDB database'):
+    if not check_file_exists(get_data_path('finna_availability.csv'), 'Finna availability CSV'):
         print("Step 4 output file missing")
+        return 1
+    
+    # Step 5: Load into DuckDB
+    step5_cmd = '. "$HOME/.cargo/env" && uv run python load_to_duckdb.py'
+    if not run_command(step5_cmd, "Load data into DuckDB database"):
+        print("Pipeline failed at step 5")
+        return 1
+    
+    # Check Step 5 output
+    if not check_file_exists(get_data_path('boardgames.db'), 'DuckDB database'):
+        print("Step 5 output file missing")
         return 1
     
     # Final summary
@@ -110,6 +122,7 @@ def main():
     check_file_exists(get_data_path('finna_board_games.csv'), 'Finna games data')
     check_file_exists(get_data_path('finna_bgg_relations.csv'), 'Finna-BGG relations')
     check_file_exists(get_data_path('bgg_games.csv'), 'BGG game details')
+    check_file_exists(get_data_path('finna_availability.csv'), 'Finna availability data')
     check_file_exists(get_data_path('boardgames.db'), 'DuckDB database')
     
     print(f"\nYou can now run the dashboard with:")
