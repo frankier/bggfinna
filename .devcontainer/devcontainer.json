@@ -1,0 +1,65 @@
+{
+	"name": "BGG + Finna Board Game Explorer",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": ".."
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.pylint",
+				"ms-python.flake8",
+				"ms-python.black-formatter",
+				"ms-toolsai.jupyter",
+				"GitHub.copilot",
+				"GitHub.copilot-chat",
+				"ms-vscode.vscode-json",
+				"redhat.vscode-yaml",
+				"ms-vscode.test-adapter-converter",
+				"ms-python.pytest"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.terminal.activateEnvironment": false,
+				"python.linting.enabled": true,
+				"python.linting.pylintEnabled": true,
+				"python.formatting.provider": "black",
+				"python.testing.pytestEnabled": true,
+				"python.testing.pytestArgs": ["tests/"],
+				"files.watcherExclude": {
+					"**/data/**": true,
+					"**/logs/**": true,
+					"**/.git/**": true
+				}
+			}
+		}
+	},
+	"forwardPorts": [8501],
+	"portsAttributes": {
+		"8501": {
+			"label": "Streamlit Dashboard",
+			"onAutoForward": "notify"
+		}
+	},
+	"mounts": [
+		"source=${localWorkspaceFolder}/.claude,target=/workspaces/bggfinna/.claude,type=bind,consistency=cached",
+		"source=bggfinna-data,target=/workspaces/bggfinna/data,type=volume",
+		"source=bggfinna-logs,target=/workspaces/bggfinna/logs,type=volume"
+	],
+	"containerEnv": {
+		"PYTHONPATH": "/workspaces/bggfinna/src",
+		"BGGFINNA_PROJECT_ROOT": "/workspaces/bggfinna"
+	},
+	"remoteEnv": {
+		"PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
+	},
+	"postCreateCommand": ".devcontainer/post-create.sh",
+	"postStartCommand": ".devcontainer/init-firewall.sh",
+	"remoteUser": "vscode",
+	"workspaceFolder": "/workspaces/bggfinna",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	}
+}

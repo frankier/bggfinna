@@ -10,6 +10,22 @@ This pipeline fetches board game data from Finnish libraries via the Finna API, 
 
 ## Setup
 
+### Option 1: Devcontainer (Recommended)
+
+For the best development experience with isolated, secure environment:
+
+1. **Prerequisites**: VS Code with Remote - Containers extension and Docker Desktop
+2. **Setup**: Open repository in VS Code and click "Reopen in Container" 
+3. **Ready**: Container automatically installs dependencies and configures environment
+
+The devcontainer provides:
+- Pre-configured Python 3.11 environment with uv
+- Network security restrictions (only necessary APIs allowed)
+- Streamlit port forwarding
+- All development tools ready to use
+
+### Option 2: Local Setup
+
 Ensure you have the required tools:
 - Python with uv package manager
 

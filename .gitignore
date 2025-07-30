@@ -12,3 +12,6 @@ wheels/
 # Data and logs
 data/
 logs/
+
+# Devcontainer local overrides (keep main config tracked)
+.devcontainer/devcontainer.local.json

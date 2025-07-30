@@ -58,7 +58,37 @@ uv run python test_smoke.py
 
 ## Development Setup
 
-Tools and libraries in use include
+### Option 1: Devcontainer (Recommended for Claude Code)
+
+The project includes a devcontainer configuration for isolated, secure development with Claude Code:
+
+**Prerequisites:**
+- VS Code with Remote - Containers extension
+- Docker Desktop
+
+**Setup:**
+1. Open the repository in VS Code
+2. Click "Reopen in Container" when prompted (or use Command Palette > "Remote-Containers: Reopen in Container")
+3. VS Code will build the container and set up the environment automatically
+4. The container includes:
+   - Python 3.11 with uv package manager
+   - All project dependencies pre-installed
+   - Network firewall restricting access to necessary APIs only
+   - VS Code extensions for Python development
+   - Streamlit port forwarding (8501)
+
+**Security Features:**
+- Isolated container environment
+- Network firewall allowing only necessary APIs:
+  - `api.finna.fi` (Finna API)
+  - `boardgamegeek.com` (BGG API)
+  - `github.com` (Git operations)
+  - Python package repositories
+- Data persistence through Docker volumes
+
+### Option 2: Local Development
+
+Tools and libraries in use include:
  
  * Python (run with `. "$HOME/.cargo/env" && uv run python`)
  * uv
